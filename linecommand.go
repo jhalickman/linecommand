@@ -11,11 +11,12 @@ import (
 )
 
 type Command struct {
-	Use   string                          // The one-line usage message.
-	Short string                          // The short description shown in the 'help' output.
-	Long  string                          // The long message shown in the 'help <this-command>' output.
-	Run   func(cmd *Command, args string) // Run runs the command.
-	App   *App
+	Use       string                          // The one-line usage message.
+	Short     string                          // The short description shown in the 'help' output.
+	Long      string                          // The long message shown in the 'help <this-command>' output.
+	Run       func(cmd *Command, args string) // Run runs the command.
+	App       *App
+	Completer liner.Completer
 }
 
 type App struct {
@@ -51,6 +52,31 @@ func (a *App) internalRun() error {
 			f.Close()
 		}
 	}
+
+	a.Liner.SetCompleter(func(line string) []string {
+		c := make([]string, 0)
+
+		for _, command := range a.Commands {
+
+			if strings.HasPrefix(strings.ToLower(line), command.Use+" ") {
+				c = make([]string, 0)
+				if command.Completer != nil {
+					line = strings.Replace(line, command.Use+" ", "", 1)
+					sc := command.Completer(line)
+					for _, subCommand := range sc {
+						c = append(c, command.Use+" "+subCommand)
+					}
+				}
+
+				return c
+			}
+			if strings.HasPrefix(command.Use, strings.ToLower(line)) {
+				c = append(c, command.Use)
+			}
+		}
+
+		return c
+	})
 
 	for {
 		l, e := a.Liner.Prompt(fmt.Sprintf("%s> ", a.CommandTitle))
