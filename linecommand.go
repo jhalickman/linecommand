@@ -2,9 +2,10 @@ package linecommand
 
 import (
 	"fmt"
+	"github.com/chzyer/readline"
 	"github.com/peterh/liner"
 	"github.com/xlab/closer"
-	"os"
+	"log"
 	"os/user"
 	"path/filepath"
 	"strings"
@@ -22,8 +23,13 @@ type Command struct {
 type App struct {
 	Commands     []Command
 	DefaultRun   func(args string)
-	Liner        *liner.State
-	CommandTitle string
+	Liner        *readline.Instance
+	commandTitle string
+}
+
+func (a *App) SetCommandTitle(title string) {
+	a.commandTitle = title
+	a.Liner.SetPrompt(fmt.Sprintf("%s>", title))
 }
 
 func (a *App) AddCommand(command Command) {
@@ -32,67 +38,65 @@ func (a *App) AddCommand(command Command) {
 }
 
 func (a *App) Run() {
-
 	closer.Bind(a.cleanup)
 	closer.Checked(a.internalRun, true)
 	defer closer.Close()
 }
 
-func (a *App) internalRun() error {
-	a.Liner = liner.NewLiner()
+func (a *App) Do(lr []rune, pos int) (newLine [][]rune, length int) {
+	c := make([][]rune, 0)
+	line := string(lr)
 
+	for _, command := range a.Commands {
+
+		if strings.HasPrefix(strings.ToLower(line), command.Use+" ") {
+			c = make([][]rune, 0)
+			if command.Completer != nil {
+				line = strings.Replace(line, command.Use+" ", "", 1)
+				sc := command.Completer(line)
+				for _, subCommand := range sc {
+					c = append(c, []rune(command.Use + " " + subCommand)[pos:])
+				}
+			}
+
+			return c, len(line) + 1
+		}
+		if strings.HasPrefix(command.Use, strings.ToLower(line)) {
+			c = append(c, []rune(command.Use)[pos:])
+		}
+	}
+
+	return c, len(line)
+}
+
+func (a *App) internalRun() error {
+	if a.commandTitle == "" {
+		a.commandTitle = ">"
+	}
 	var historyFile string
 	usr, err := user.Current()
 	// Only load history if we can get the user
 	if err == nil {
 		historyFile = filepath.Join(usr.HomeDir, ".command_history")
-
-		if f, err := os.Open(historyFile); err == nil {
-			a.Liner.ReadHistory(f)
-			f.Close()
-		}
 	}
 
-	a.Liner.SetCompleter(func(line string) []string {
-		c := make([]string, 0)
-
-		for _, command := range a.Commands {
-
-			if strings.HasPrefix(strings.ToLower(line), command.Use+" ") {
-				c = make([]string, 0)
-				if command.Completer != nil {
-					line = strings.Replace(line, command.Use+" ", "", 1)
-					sc := command.Completer(line)
-					for _, subCommand := range sc {
-						c = append(c, command.Use+" "+subCommand)
-					}
-				}
-
-				return c
-			}
-			if strings.HasPrefix(command.Use, strings.ToLower(line)) {
-				c = append(c, command.Use)
-			}
-		}
-
-		return c
+	l, err := readline.NewEx(&readline.Config{
+		Prompt:       a.commandTitle,
+		HistoryFile:  historyFile,
+		AutoComplete: a,
 	})
+	if err != nil {
+		return err
+	}
+	a.Liner = l
+	log.SetOutput(l.Stderr())
 
 	for {
-		l, e := a.Liner.Prompt(fmt.Sprintf("%s> ", a.CommandTitle))
+		l, e := a.Liner.Readline()
 		if e != nil {
 			return e
 		}
-		if a.ParseCommand(l) {
-			// write out the history
-			if len(historyFile) > 0 {
-				a.Liner.AppendHistory(l)
-				if f, err := os.Create(historyFile); err == nil {
-					a.Liner.WriteHistory(f)
-					f.Close()
-				}
-			}
-		} else {
+		if !a.ParseCommand(l) {
 			break // exit main loop
 		}
 	}
