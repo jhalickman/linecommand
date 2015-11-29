@@ -16,7 +16,7 @@ type Command struct {
 	Short     string                          // The short description shown in the 'help' output.
 	Long      string                          // The long message shown in the 'help <this-command>' output.
 	Run       func(cmd *Command, args string) // Run runs the command.
-	app       *App
+	App       *App
 //	Completer func(line string) (c []string)
 	CompleteOptions []string
 }
@@ -38,7 +38,7 @@ func (a *App) SetCommandTitle(title string) {
 
 //AddCommand adds a new command to your application
 func (a *App) AddCommand(command Command) {
-	command.app = a
+	command.App = a
 	a.Commands = append(a.Commands, command)
 	
 	//Completer options
