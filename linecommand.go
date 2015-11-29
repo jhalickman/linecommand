@@ -3,7 +3,6 @@ package linecommand
 import (
 	"fmt"
 	"github.com/chzyer/readline"
-	"github.com/peterh/liner"
 	"github.com/xlab/closer"
 	"log"
 	"os/user"
@@ -11,40 +10,54 @@ import (
 	"strings"
 )
 
+//Command is an individual command for your application 
 type Command struct {
 	Use       string                          // The one-line usage message.
 	Short     string                          // The short description shown in the 'help' output.
 	Long      string                          // The long message shown in the 'help <this-command>' output.
 	Run       func(cmd *Command, args string) // Run runs the command.
 	App       *App
-	Completer liner.Completer
+//	Completer func(line string) (c []string)
+	CompleteOptions []string
 }
 
+//App describes the application and holds your commands
 type App struct {
 	Commands     []Command
 	DefaultRun   func(args string)
-	Liner        *readline.Instance
+	line        *readline.Instance
 	commandTitle string
+	completeOptions []*readline.PrefixCompleter
 }
 
+//SetCommandTitle sets the string before > in the repl.
 func (a *App) SetCommandTitle(title string) {
 	a.commandTitle = title
-	a.Liner.SetPrompt(fmt.Sprintf("%s>", title))
+	a.line.SetPrompt(fmt.Sprintf("%s>", title))
 }
 
+//AddCommand adds a new command to your application
 func (a *App) AddCommand(command Command) {
 	command.App = a
 	a.Commands = append(a.Commands, command)
+	
+	//Completer options
+	var children []*readline.PrefixCompleter
+	for _, child := range command.CompleteOptions {
+		children = append(children, readline.PcItem(child))
+	}
+	a.completeOptions = append(a.completeOptions, readline.PcItem(command.Use, children...))
 }
 
+//Run starts the application run loop
 func (a *App) Run() {
 	closer.Bind(a.cleanup)
 	closer.Checked(a.internalRun, true)
 	defer closer.Close()
 }
 
-func (a *App) Do(lr []rune, pos int) (newLine [][]rune, length int) {
-	c := make([][]rune, 0)
+/*func (a *App) Do(lr []rune, pos int) (newLine [][]rune, length int) {
+	var c [][]rune
 	line := string(lr)
 
 	for _, command := range a.Commands {
@@ -67,7 +80,7 @@ func (a *App) Do(lr []rune, pos int) (newLine [][]rune, length int) {
 	}
 
 	return c, len(line)
-}
+}*/
 
 func (a *App) internalRun() error {
 	if a.commandTitle == "" {
@@ -83,20 +96,20 @@ func (a *App) internalRun() error {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:       a.commandTitle,
 		HistoryFile:  historyFile,
-		AutoComplete: a,
+		AutoComplete: readline.NewPrefixCompleter(a.completeOptions...),
 	})
 	if err != nil {
 		return err
 	}
-	a.Liner = l
+	a.line = l
 	log.SetOutput(l.Stderr())
 
 	for {
-		l, e := a.Liner.Readline()
+		l, e := a.line.Readline()
 		if e != nil {
 			return e
 		}
-		if !a.ParseCommand(l) {
+		if !a.parseCommand(l) {
 			break // exit main loop
 		}
 	}
@@ -104,7 +117,7 @@ func (a *App) internalRun() error {
 	return nil
 }
 
-func (a *App) ParseCommand(cmd string) bool {
+func (a *App) parseCommand(cmd string) bool {
 	lcmd := strings.TrimSpace(strings.ToLower(cmd))
 	if strings.HasPrefix(lcmd, "exit") {
 		// signal the program to exit
@@ -143,5 +156,5 @@ func (a *App) help() {
 }
 
 func (a *App) cleanup() {
-	a.Liner.Close()
+	a.line.Close()
 }
