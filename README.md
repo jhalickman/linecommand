@@ -12,7 +12,7 @@ To use linecommand:
 3. Call ```app.Run()```
 
 Example:
-```golang
+```go
 
 package main
 
